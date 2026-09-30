@@ -230,6 +230,12 @@
             }
         }
     </style>
+<style>
+#telaPagamento { text-align: center; }
+#qrPix { background: #fff; padding: 12px; border-radius: 12px; display: inline-block; margin: 12px 0; }
+#pixCopiaCola { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; font-size: 12px; resize: none; margin-bottom: 10px; }
+#telaPagamento a.btn { display: inline-block; text-decoration: none; text-align: center; }
+</style>
 </head>
 
 <body>
@@ -352,6 +358,21 @@
 
         </form>
 
+<div id="telaPagamento" style="display:none">
+    <h2>Falta pouco!</h2>
+    <p>Pague <strong>R$ 25,00</strong> via Pix e envie o comprovante no WhatsApp para receber seu acesso.</p>
+    <div id="qrPix"></div>
+    <textarea id="pixCopiaCola" readonly rows="4"></textarea>
+    <div class="acoes">
+        <button type="button" class="btn" id="btnCopiarPix">Copiar código Pix</button>
+    </div>
+    <div class="acoes">
+        <a class="btn" id="linkComprovante" target="_blank" rel="noopener">Enviar comprovante no WhatsApp</a>
+    </div>
+    <div class="acoes"><button type="button" class="btn cancelar" onclick="fecharCadastro()">Fechar</button></div>
+    <div class="mensagem" id="msgPix"></div>
+</div>
+
     </div>
 
 </div>
@@ -360,6 +381,7 @@
     © 2026 PLAYMAX — Todos os direitos reservados.
 </footer>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 
     // CONFIGURAÇÃO DO SUPABASE
@@ -369,6 +391,89 @@
 
     const SUPABASE_KEY = "sb_publishable_9Q9g9ziWIZuhq24zRPp11Q_OgIMhkq6";
 
+        // CONFIGURACAO DO PIX (manual)
+    const PIX_CHAVE = "5fbf536f-8dea-4ff2-9546-7f4e0e487e3d";
+    const PIX_NOME = "ADRIANA MARIA DE LIMA";
+    const PIX_CIDADE = "MOSSORO";
+    const PIX_VALOR = "25.00";
+    const PIX_WHATSAPP = "5584999415379";
+
+    function pixCampo(id, valor) {
+        return id + String(valor.length).padStart(2, "0") + valor;
+    }
+
+    function pixCRC16(texto) {
+        let crc = 0xFFFF;
+        for (let i = 0; i < texto.length; i++) {
+            crc ^= texto.charCodeAt(i) << 8;
+            for (let j = 0; j < 8; j++) {
+                crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+                crc &= 0xFFFF;
+            }
+        }
+        return crc.toString(16).toUpperCase().padStart(4, "0");
+    }
+
+    function gerarPix() {
+        const conta = pixCampo("00", "br.gov.bcb.pix") + pixCampo("01", PIX_CHAVE);
+        const payload =
+            pixCampo("00", "01") +
+            pixCampo("01", "11") +
+            pixCampo("26", conta) +
+            pixCampo("52", "0000") +
+            pixCampo("53", "986") +
+            pixCampo("54", PIX_VALOR) +
+            pixCampo("58", "BR") +
+            pixCampo("59", PIX_NOME) +
+            pixCampo("60", PIX_CIDADE) +
+            pixCampo("62", pixCampo("05", "***")) +
+            "6304";
+        return payload + pixCRC16(payload);
+    }
+
+    function resetarModal() {
+        document.getElementById("formCadastro").style.display = "";
+        document.querySelectorAll(".modal-box > h2, .modal-box > p").forEach(function(el) { el.style.display = ""; });
+        document.getElementById("telaPagamento").style.display = "none";
+        document.getElementById("qrPix").innerHTML = "";
+        document.getElementById("msgPix").textContent = "";
+    }
+
+    function mostrarPagamento(nome) {
+        const codigo = gerarPix();
+        document.getElementById("formCadastro").style.display = "none";
+        document.querySelectorAll(".modal-box > h2, .modal-box > p").forEach(function(el) { el.style.display = "none"; });
+        document.getElementById("telaPagamento").style.display = "block";
+        document.getElementById("pixCopiaCola").value = codigo;
+
+        const qr = document.getElementById("qrPix");
+        qr.innerHTML = "";
+        qr.style.display = "inline-block";
+        try {
+            new QRCode(qr, { text: codigo, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+        } catch (e) {
+            console.error("QR Code indisponivel:", e);
+            qr.style.display = "none";
+        }
+
+        document.getElementById("linkComprovante").href =
+            "https://wa.me/" + PIX_WHATSAPP + "?text=" +
+            encodeURIComponent("Ol\u00e1! Sou " + nome + " e estou enviando o comprovante do Pix de R$ 25,00 (PLAYMAX).");
+    }
+
+    document.getElementById("btnCopiarPix").addEventListener("click", function() {
+        const campo = document.getElementById("pixCopiaCola");
+        const msg = document.getElementById("msgPix");
+        campo.select();
+        try {
+            if (navigator.clipboard) { navigator.clipboard.writeText(campo.value); } else { document.execCommand("copy"); }
+            msg.textContent = "C\u00f3digo copiado!";
+            msg.style.color = "#32d583";
+        } catch (e) {
+            msg.textContent = "Selecione o texto e copie manualmente.";
+            msg.style.color = "#ff4d4d";
+        }
+    });
     function abrirCadastro() {
         document
             .getElementById("modalCadastro")
@@ -376,6 +481,7 @@
     }
 
     function fecharCadastro() {
+        resetarModal();
         document
             .getElementById("modalCadastro")
             .classList.remove("active");
@@ -452,9 +558,7 @@
                     .getElementById("formCadastro")
                     .reset();
 
-                setTimeout(function() {
-                    fecharCadastro();
-                }, 1800);
+                mostrarPagamento(nome);
 
                 console.log("Cliente cadastrado:", dados);
 
