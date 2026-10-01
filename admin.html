@@ -59,7 +59,7 @@ async function carregar(){
   const r3 = await sb.from('pedidos').select('cliente_id').eq('status', 'paid');
   const lista = $('lista'); lista.textContent = '';
   if (r2.error){ lista.textContent = 'Erro: ' + r2.error.message; return; }
-  const pagos = new Set((r3.data || []).map(p => p.cliente_id));
+  const tel = x => (x.whatsapp || '').replace(/\D/g, ''); const repetido = cl => r2.data.some(o => o.id < cl.id && ((tel(o) && tel(o) === tel(cl)) || (o.email || '').toLowerCase() === (cl.email || '').toLowerCase())); const pagos = new Set((r3.data || []).map(p => p.cliente_id));
   r2.data.forEach(function(cl){
     const card = el('div', 'card');
     card.appendChild(el('strong', '', cl.name));
@@ -71,7 +71,7 @@ async function carregar(){
       b.addEventListener('click', function(){ entregar(cl, b); });
       card.appendChild(b);
     }
-    lista.appendChild(card);
+    if (repetido(cl)) { card.insertBefore(el('small', 'ok', 'Já foi cliente: cadastro repetido'), card.children[1]); } lista.appendChild(card);
   });
 }
 
