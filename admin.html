@@ -1,0 +1,122 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>PLAYMAX Admin</title>
+<style>
+[hidden]{display:none!important}
+body{margin:0;background:#0d0d12;color:#eee;font-family:Arial,sans-serif}
+.wrap{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:20px} h2{font-size:16px;margin:0 0 8px}
+section,#login{background:#181820;border-radius:12px;padding:14px;margin-bottom:14px}
+input,textarea{width:100%;box-sizing:border-box;padding:10px;margin:4px 0;border-radius:8px;border:1px solid #333;background:#0d0d12;color:#eee}
+button,a.b{background:#7c3aed;color:#fff;border:0;border-radius:8px;padding:10px 14px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:6px}
+.card{border-top:1px solid #2a2a35;padding:10px 0}.card small{color:#9a9aa8;display:block}
+.ok{color:#32d583}.err{color:#ff4d4d}
+</style></head><body><div class="wrap">
+<h1>PLAYMAX · Admin</h1>
+<div id="login"><form id="fLogin">
+<input type="email" id="email" placeholder="E-mail" required>
+<input type="password" id="senha" placeholder="Senha" required>
+<button type="submit">Entrar</button></form><div id="msgLogin" class="err"></div></div>
+<div id="painel" hidden>
+<button id="sair">Sair</button>
+<section><h2>Estoque de códigos</h2><div id="estoque"></div></section>
+<section><h2>Adicionar códigos</h2>
+<textarea id="novos" rows="5" placeholder="Um código por linha"></textarea>
+<button id="btnAdd">Adicionar</button><div id="msgAdd"></div></section>
+<section><h2>Clientes</h2><div id="resultado"></div><div id="lista"></div></section>
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const sb = supabase.createClient("https://owzamemhgbmrqmwlkqcc.supabase.co", "sb_publishable_9Q9g9ziWIZuhq24zRPp11Q_OgIMhkq6");
+const $ = id => document.getElementById(id);
+const PLANO_ID = 1, VALOR = 2500;
+function el(tag, cls, txt){ const e=document.createElement(tag); if(cls) e.className=cls; if(txt!==undefined) e.textContent=txt; return e; }
+
+async function checar(){
+  const r = await sb.auth.getSession(); const s = r.data.session;
+  if (s && s.user.app_metadata && s.user.app_metadata.is_admin === true){
+    $('login').hidden = true; $('painel').hidden = false; carregar();
+  } else {
+    if (s) await sb.auth.signOut();
+    $('login').hidden = false; $('painel').hidden = true;
+  }
+}
+$('fLogin').addEventListener('submit', async function(e){
+  e.preventDefault(); $('msgLogin').textContent = '';
+  const r = await sb.auth.signInWithPassword({ email: $('email').value.trim(), password: $('senha').value });
+  if (r.error){ $('msgLogin').textContent = 'Login inválido.'; return; }
+  $('senha').value = ''; checar();
+});
+$('sair').addEventListener('click', async function(){ await sb.auth.signOut(); checar(); });
+
+async function carregar(){
+  const r1 = await sb.from('codigos').select('status');
+  const c = { available:0, reserved:0, delivered:0, blocked:0 };
+  (r1.data || []).forEach(x => { c[x.status] = (c[x.status] || 0) + 1; });
+  $('estoque').textContent = 'Disponíveis: ' + c.available + ' · Reservados: ' + c.reserved + ' · Entregues: ' + c.delivered + ' · Bloqueados: ' + c.blocked;
+  const r2 = await sb.from('clientes').select('id,created_at,name,whatsapp,email').order('id', {ascending:false}).limit(100);
+  const r3 = await sb.from('pedidos').select('cliente_id').eq('status', 'paid');
+  const lista = $('lista'); lista.textContent = '';
+  if (r2.error){ lista.textContent = 'Erro: ' + r2.error.message; return; }
+  const pagos = new Set((r3.data || []).map(p => p.cliente_id));
+  r2.data.forEach(function(cl){
+    const card = el('div', 'card');
+    card.appendChild(el('strong', '', cl.name));
+    card.appendChild(el('small', '', (cl.whatsapp || 'sem WhatsApp') + ' · ' + cl.email));
+    card.appendChild(el('small', '', new Date(cl.created_at).toLocaleString('pt-BR')));
+    if (pagos.has(cl.id)) { card.appendChild(el('span', 'ok', '✔ pago e entregue')); }
+    else {
+      const b = el('button', '', 'Confirmar pagamento e entregar');
+      b.addEventListener('click', function(){ entregar(cl, b); });
+      card.appendChild(b);
+    }
+    lista.appendChild(card);
+  });
+}
+
+$('btnAdd').addEventListener('click', async function(){
+  const linhas = Array.from(new Set($('novos').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean)));
+  const msg = $('msgAdd');
+  if (!linhas.length){ msg.className = 'err'; msg.textContent = 'Cole ao menos um código.'; return; }
+  const r = await sb.from('codigos').insert(linhas.map(c => ({ codigo: c })));
+  if (r.error){ msg.className = 'err'; msg.textContent = 'Erro: ' + r.error.message; return; }
+  msg.className = 'ok'; msg.textContent = linhas.length + ' código(s) adicionado(s).';
+  $('novos').value = ''; carregar();
+});
+
+async function entregar(cl, botao){
+  if (!confirm('Você conferiu no banco o pagamento de ' + cl.name + '?')) return;
+  botao.disabled = true; const res = $('resultado'); res.className = ''; res.textContent = 'Processando...';
+  let cod = null, pedidoId = null;
+  try {
+    const a = await sb.from('codigos').select('id,codigo').eq('status', 'available').order('id').limit(1);
+    if (a.error) throw a.error;
+    if (!a.data.length) throw new Error('Sem códigos disponíveis. Adicione mais códigos.');
+    cod = a.data[0];
+    const b = await sb.from('codigos').update({ status:'reserved', reserved_at:new Date().toISOString() }).eq('id', cod.id).eq('status', 'available').select('id');
+    if (b.error) throw b.error;
+    if (!b.data.length) { cod = null; throw new Error('O código foi pego por outra ação. Tente de novo.'); }
+    const agora = new Date().toISOString();
+    const p = await sb.from('pedidos').insert({ cliente_id: cl.id, plano_id: PLANO_ID, valor_centavos: VALOR, status: 'paid', paid_at: agora }).select('id').single();
+    if (p.error) throw p.error; pedidoId = p.data.id;
+    const g = await sb.from('pagamentos').insert({ pedido_id: pedidoId, gateway: 'manual', gateway_status: 'manual', valor_centavos: VALOR, paid_at: agora });
+    if (g.error) throw g.error;
+    const en = await sb.from('entregas').insert({ pedido_id: pedidoId, codigo_id: cod.id });
+    if (en.error) throw en.error;
+    const d = await sb.from('codigos').update({ status:'delivered', delivered_at:new Date().toISOString() }).eq('id', cod.id);
+    if (d.error) throw d.error;
+    let tel = (cl.whatsapp || '').replace(/\D/g, ''); if (tel.length <= 11) tel = '55' + tel;
+    const txt = 'Olá, ' + cl.name + '! Pagamento confirmado. Seu código de acesso PLAYMAX: ' + cod.codigo;
+    res.className = 'ok'; res.textContent = 'Entregue! Código: ' + cod.codigo + ' ';
+    const w = el('a', 'b', 'Enviar no WhatsApp'); w.target = '_blank'; w.rel = 'noopener';
+    w.href = 'https://wa.me/' + tel + '?text=' + encodeURIComponent(txt);
+    res.appendChild(w); carregar();
+  } catch (err) {
+    if (pedidoId){ await sb.from('entregas').delete().eq('pedido_id', pedidoId); await sb.from('pagamentos').delete().eq('pedido_id', pedidoId); await sb.from('pedidos').delete().eq('id', pedidoId); }
+    if (cod){ await sb.from('codigos').update({ status:'available', reserved_at:null, delivered_at:null }).eq('id', cod.id); }
+    res.className = 'err'; res.textContent = 'Não foi possível entregar: ' + err.message; botao.disabled = false;
+  }
+}
+checar();
+</script></body></html>
